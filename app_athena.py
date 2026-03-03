@@ -1,5 +1,5 @@
 """
-BLOC 3 — Interface Streamlit : Athena Pricer
+BLOC 3 — Interface Streamlit : Structured Products Risk Simulator
 """
 import streamlit as st
 import numpy as np
@@ -28,7 +28,7 @@ from heston_simulator import (
 from athena_payoff import pricer_athena
 
 st.set_page_config(
-    page_title="Structured Products Risk Analysis",
+    page_title="Structured Products Risk Simulator",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -85,36 +85,6 @@ INDICES_CATALOGUE = {
     },
 }
 
-ACTIONS_CATALOGUE = {
-    "France": {
-        "LVMH":         "MC.PA",
-        "TotalEnergies":"TTE.PA",
-        "Airbus":       "AIR.PA",
-        "Hermes":       "RMS.PA",
-        "Sanofi":       "SAN.PA",
-        "BNP Paribas":  "BNP.PA",
-        "Schneider":    "SU.PA",
-        "L'Oreal":      "OR.PA",
-    },
-    "Europe": {
-        "ASML":         "ASML.AS",
-        "SAP":          "SAP.DE",
-        "Siemens":      "SIE.DE",
-        "BASF":         "BAS.DE",
-        "Allianz":      "ALV.DE",
-    },
-    "Etats-Unis": {
-        "Apple":        "AAPL",
-        "Microsoft":    "MSFT",
-        "Amazon":       "AMZN",
-        "Alphabet":     "GOOGL",
-        "NVIDIA":       "NVDA",
-        "Tesla":        "TSLA",
-        "JPMorgan":     "JPM",
-        "ExxonMobil":   "XOM",
-    },
-}
-
 BG      = "#080c14"
 CARD_BG = "#0d1220"
 BORDER  = "#1e293b"
@@ -125,7 +95,6 @@ GOLD    = "#fbbf24"
 TEXT    = "#e2e8f0"
 MUTED   = "#475569"
 
-# TEXT partout pour que les axes/chiffres soient bien visibles
 PLT_STYLE = {
     "figure.facecolor": BG,    "axes.facecolor": CARD_BG,
     "axes.edgecolor":  BORDER, "axes.labelcolor": TEXT,
@@ -145,14 +114,45 @@ def style_ax(ax):
 
 def fig_to_buf(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight", facecolor=fig.get_facecolor())
+    fig.savefig(buf, format="png", dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
     buf.seek(0)
     plt.close(fig)
     return buf
 
+def plot_monte_carlo(S, params, label):
+    """Graphique des trajectoires Monte Carlo."""
+    with plt.rc_context(PLT_STYLE):
+        fig, ax = plt.subplots(figsize=(12, 4.5))
+        style_ax(ax)
+        T = params["T"]
+        steps = S.shape[1] - 1
+        t = np.linspace(0, T, steps + 1)
+        n_display = min(200, S.shape[0])
+        idx = np.random.choice(S.shape[0], n_display, replace=False)
+        bp = params["barriere_protect"] * 100
+        br = params["barriere_rappel"] * 100
+        for i in idx:
+            traj = S[i]
+            touched = np.any(traj < bp)
+            color = RED if touched else "#1e3a5f"
+            alpha = 0.25 if touched else 0.12
+            ax.plot(t, traj, color=color, lw=0.6, alpha=alpha)
+        ax.axhline(100,  color=TEXT,  lw=1.5, ls="--", label="Niveau initial (100)", zorder=5)
+        ax.axhline(bp,   color=RED,   lw=1.5, ls="--", label=f"Barriere protection ({bp:.0f}%)", zorder=5)
+        ax.axhline(br,   color=GOLD,  lw=1.2, ls=":",  label=f"Barriere rappel ({br:.0f}%)", zorder=5)
+        mean_path = S[idx].mean(axis=0)
+        ax.plot(t, mean_path, color=BLUE, lw=2.5, label="Trajectoire moyenne", zorder=6)
+        ax.set_title(f"Simulation Monte Carlo — {n_display} trajectoires sur {S.shape[0]:,}  |  {label}", fontsize=10, pad=10)
+        ax.set_xlabel("Annees depuis emission")
+        ax.set_ylabel("Valeur du sous-jacent (base 100)")
+        ax.legend(fontsize=8, facecolor=CARD_BG, labelcolor=TEXT, framealpha=0.9, edgecolor=BORDER, loc="upper left")
+        ax.grid(True, alpha=0.15)
+        fig.tight_layout()
+    return fig_to_buf(fig)
+
 def plot_payoff_kde(payoffs, params, label):
     with plt.rc_context(PLT_STYLE):
-        fig, ax = plt.subplots(figsize=(7, 3.8))
+        fig, ax = plt.subplots(figsize=(5.5, 3.2))
         style_ax(ax)
         kde = gaussian_kde(payoffs, bw_method=0.15)
         x   = np.linspace(max(0, payoffs.min()), payoffs.max(), 600)
@@ -165,8 +165,7 @@ def plot_payoff_kde(payoffs, params, label):
             ax.fill_between(x_loss, kde(x_loss), alpha=0.35, color=RED)
         ax.axvline(100, color=TEXT, lw=1.2, ls="--", label="Capital initial")
         ax.axvline(bp,  color=RED,  lw=1.2, ls="--", label=f"Barriere {bp:.0f}%")
-        ax.axvline(np.percentile(payoffs, 10), color=GOLD, lw=1, ls=":",
-                   label=f"P10 = {np.percentile(payoffs,10):.1f}")
+        ax.axvline(np.percentile(payoffs, 10), color=GOLD, lw=1, ls=":", label=f"P10 = {np.percentile(payoffs,10):.1f}")
         ax.set_title("Distribution des payoffs", fontsize=10, pad=10)
         ax.set_xlabel("Payoff final  (investi = 100)")
         ax.set_ylabel("Densite")
@@ -176,7 +175,7 @@ def plot_payoff_kde(payoffs, params, label):
 
 def plot_sensitivity(S, params, label):
     with plt.rc_context(PLT_STYLE):
-        fig, ax = plt.subplots(figsize=(7, 3.8))
+        fig, ax = plt.subplots(figsize=(5.5, 3.2))
         style_ax(ax)
         niveaux   = np.arange(0.40, 0.86, 0.025)
         p_barrier = [np.mean((S < 100*niv).any(axis=1))*100 for niv in niveaux]
@@ -196,7 +195,7 @@ def plot_sensitivity(S, params, label):
 
 def plot_recall_bars(recall_proba, T, label):
     with plt.rc_context(PLT_STYLE):
-        fig, ax = plt.subplots(figsize=(7, 3.8))
+        fig, ax = plt.subplots(figsize=(5.5, 3.2))
         style_ax(ax)
         rp   = recall_proba * 100
         x    = np.arange(1, T+1)
@@ -216,7 +215,7 @@ def plot_recall_bars(recall_proba, T, label):
 
 def plot_cumul_barrier(S, params, label):
     with plt.rc_context(PLT_STYLE):
-        fig, ax = plt.subplots(figsize=(7, 3.8))
+        fig, ax = plt.subplots(figsize=(5.5, 3.2))
         style_ax(ax)
         T              = params["T"]
         steps          = S.shape[1] - 1
@@ -293,7 +292,8 @@ def plot_comparison(res_a, S_a, label_a, res_b, S_b, label_b, params):
     return fig_to_buf(fig)
 
 def generate_pdf(label, params, heston_params, details, recall_proba,
-                 buf_kde, buf_sensitivity, buf_recalls, buf_cumul):
+                 buf_kde, buf_sensitivity, buf_recalls, buf_cumul, buf_mc,
+                 buf_comparison=None, label_b=None):
     pdf_buf = io.BytesIO()
     C_DARK  = rl_colors.HexColor("#080c14")
     C_CARD  = rl_colors.HexColor("#0d1220")
@@ -327,8 +327,8 @@ def generate_pdf(label, params, heston_params, details, recall_proba,
     v0_pct = np.sqrt(heston_params["v0"]) * 100
     th_pct = np.sqrt(heston_params["theta"]) * 100
     story = []
-    story.append(Paragraph("Structured Products Risk Analysis", s_title))
-    story.append(Paragraph(f"Structured Products Risk Analysis  .  {date.today().strftime('%d %B %Y')}", s_sub))
+    story.append(Paragraph("STRUCTURED PRODUCTS RISK SIMULATOR", s_title))
+    story.append(Paragraph(f"Structured Products Risk Analysis  ·  T. Domange  ·  {date.today().strftime('%d %B %Y')}", s_sub))
     story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD, spaceAfter=10))
     story.append(Paragraph("TERM SHEET  &amp;  RESULTATS", s_sec))
     col_w = [(W-36*mm)*x for x in [0.27, 0.18, 0.05, 0.31, 0.19]]
@@ -387,11 +387,17 @@ def generate_pdf(label, params, heston_params, details, recall_proba,
     story.append(h_tbl)
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD))
-    story.append(Paragraph("Document genere par Structured Products Risk Analysis — Modele de Heston calibre sur donnees historiques. Ce document est fourni a titre informatif et ne constitue pas un conseil en investissement.", S("disc", fontSize=6.5, textColor=C_MUTED, leading=9)))
+    story.append(Paragraph("Structured Products Risk Simulator — T. Domange  ·  Modele de Heston calibre sur donnees historiques. Ce document est fourni a titre informatif et ne constitue pas un conseil en investissement.", S("disc", fontSize=6.5, textColor=C_MUTED, leading=9)))
     story.append(PageBreak())
     story.append(Paragraph("ANALYSE GRAPHIQUE", s_title))
     story.append(Paragraph(f"{label}  .  Barriere {params['barriere_protect']*100:.0f}%  .  Coupon {params['coupon_annuel']*100:.1f}%/an  .  Maturite {T} ans", s_sub))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD, spaceAfter=10))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD, spaceAfter=8))
+    # Monte Carlo pleine largeur
+    buf_mc.seek(0)
+    mc_w = W - 36*mm
+    mc_h = mc_w * 0.32
+    story.append(RLImage(buf_mc, width=mc_w, height=mc_h))
+    story.append(Spacer(1, 8))
     img_w = (W - 36*mm - 8*mm) / 2
     ih    = img_w * 0.58
     def to_img(buf, w, h):
@@ -399,7 +405,7 @@ def generate_pdf(label, params, heston_params, details, recall_proba,
         return RLImage(buf, width=w, height=h)
     g_tbl = Table([
         [to_img(buf_kde, img_w, ih),     Spacer(8*mm,1), to_img(buf_sensitivity, img_w, ih)],
-        [Spacer(1,6*mm),                 Spacer(1,1),    Spacer(1,6*mm)],
+        [Spacer(1,5*mm),                 Spacer(1,1),    Spacer(1,5*mm)],
         [to_img(buf_recalls, img_w, ih), Spacer(8*mm,1), to_img(buf_cumul, img_w, ih)],
     ], colWidths=[img_w, 8*mm, img_w])
     g_tbl.setStyle(TableStyle([
@@ -410,7 +416,21 @@ def generate_pdf(label, params, heston_params, details, recall_proba,
     story.append(g_tbl)
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD))
-    story.append(Paragraph("Document genere par Structured Products Risk Analysis — Modele de Heston calibre sur donnees historiques. Ce document est fourni a titre informatif et ne constitue pas un conseil en investissement.", S("disc2", fontSize=6.5, textColor=C_MUTED, leading=9)))
+    story.append(Paragraph("Structured Products Risk Simulator — T. Domange  ·  Modele de Heston calibre sur donnees historiques. Ce document est fourni a titre informatif et ne constitue pas un conseil en investissement.", S("disc2", fontSize=6.5, textColor=C_MUTED, leading=9)))
+
+    # ── PAGE 3 : COMPARAISON (optionnelle) ──
+    if buf_comparison is not None and label_b is not None:
+        story.append(PageBreak())
+        story.append(Paragraph("COMPARAISON", s_title))
+        story.append(Paragraph(f"{label}  vs  {label_b}  ·  T. Domange  ·  {date.today().strftime('%d %B %Y')}", s_sub))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD, spaceAfter=10))
+        buf_comparison.seek(0)
+        cmp_w = W - 36*mm
+        cmp_h = cmp_w * 0.35
+        story.append(RLImage(buf_comparison, width=cmp_w, height=cmp_h))
+        story.append(Spacer(1, 8))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORD))
+        story.append(Paragraph("Structured Products Risk Simulator — T. Domange  ·  Modele de Heston calibre sur donnees historiques. Ce document est fourni a titre informatif et ne constitue pas un conseil en investissement.", S("disc3", fontSize=6.5, textColor=C_MUTED, leading=9)))
     def on_page(canvas, doc):
         canvas.saveState()
         canvas.setFillColor(C_DARK)
@@ -435,55 +455,53 @@ with st.sidebar:
         basket_tickers_A = None
         basket_weights_A = None
     else:
-        st.markdown("**Construis ton panier :**")
-        st.caption("Coche des actions predefinies ou tape un ticker Yahoo Finance")
-        selected_actions = {}
-        for region, actions in ACTIONS_CATALOGUE.items():
-            with st.expander(region, expanded=(region == "France")):
-                for nom, tkr in actions.items():
-                    if st.checkbox(nom, key=f"chk_{tkr}"):
-                        selected_actions[nom] = tkr
-        st.markdown("**Ajouter un ticker manuellement :**")
-        col_tk, col_add = st.columns([3, 1])
-        with col_tk:
-            custom_ticker = st.text_input("Ticker", placeholder="ex: TSMC, 005930.KS...", label_visibility="collapsed")
-        with col_add:
-            add_ticker = st.button("+ Ajouter", use_container_width=True)
-        if "custom_tickers" not in st.session_state:
-            st.session_state.custom_tickers = {}
-        if add_ticker and custom_ticker.strip():
-            tk = custom_ticker.strip().upper()
-            st.session_state.custom_tickers[tk] = tk
-        for tk in list(st.session_state.custom_tickers.keys()):
-            col_n, col_del = st.columns([4, 1])
-            with col_n:
-                st.markdown(f"<small>✓ {tk}</small>", unsafe_allow_html=True)
-            with col_del:
-                if st.button("x", key=f"del_{tk}"):
-                    del st.session_state.custom_tickers[tk]
-        all_selected = {**selected_actions, **st.session_state.custom_tickers}
-        if len(all_selected) >= 2:
-            st.markdown("**Poids (%)**")
-            n  = len(all_selected)
-            dw = round(100 / n)
-            poids_raw = {}
-            cols_w = st.columns(min(n, 3))
-            for i, (nom, tkr) in enumerate(all_selected.items()):
-                with cols_w[i % 3]:
-                    poids_raw[nom] = st.number_input(nom[:7], min_value=1, max_value=100, value=dw, step=1, key=f"w_{tkr}")
-            total = sum(poids_raw.values())
-            if total != 100:
-                st.warning(f"Total : {total}% (objectif : 100%)")
-            basket_tickers_A = list(all_selected.values())
-            basket_weights_A = [v / 100 for v in poids_raw.values()]
-            label_A          = " / ".join(list(all_selected.keys())[:3]) + ("..." if n > 3 else "")
-            ticker_A         = None
-        elif len(all_selected) == 1:
-            st.warning("Selectionnez au moins 2 actions.")
-            basket_tickers_A = None
+        st.markdown("**Tickers Yahoo Finance**")
+        st.caption("Entre jusqu'à 10 tickers. Exemples : AAPL, MC.PA, 7203.T, TSMC")
+
+        if "basket_rows" not in st.session_state:
+            st.session_state.basket_rows = [{"ticker": "", "poids": 25},
+                                             {"ticker": "", "poids": 25}]
+
+        rows = st.session_state.basket_rows
+        to_delete = None
+        for i, row in enumerate(rows):
+            c1, c2, c3 = st.columns([3, 2, 1])
+            with c1:
+                rows[i]["ticker"] = st.text_input(f"Ticker {i+1}", value=row["ticker"],
+                    placeholder="ex: AAPL", key=f"tk_{i}", label_visibility="collapsed")
+            with c2:
+                rows[i]["poids"] = st.number_input(f"Poids {i+1}", min_value=1, max_value=100,
+                    value=row["poids"], step=1, key=f"pw_{i}", label_visibility="collapsed")
+            with c3:
+                if len(rows) > 2:
+                    if st.button("x", key=f"del_{i}"):
+                        to_delete = i
+        if to_delete is not None:
+            st.session_state.basket_rows.pop(to_delete)
+            st.rerun()
+
+        if len(rows) < 10:
+            if st.button("+ Ajouter une action"):
+                st.session_state.basket_rows.append({"ticker": "", "poids": 10})
+                st.rerun()
+
+        valid_rows = [(r["ticker"].strip().upper(), r["poids"]) for r in rows if r["ticker"].strip()]
+        total_poids = sum(p for _, p in valid_rows)
+        if total_poids != 100 and len(valid_rows) >= 2:
+            st.warning(f"Total : {total_poids}% (objectif : 100%)")
+        elif len(valid_rows) >= 2 and total_poids == 100:
+            st.success("Panier valide")
+
+        if len(valid_rows) >= 2:
+            basket_tickers_A = [t for t, _ in valid_rows]
+            basket_weights_A = [p/100 for _, p in valid_rows]
+            label_A = " / ".join(basket_tickers_A)
+            ticker_A = None
         else:
-            st.info("Cochez des actions ou tapez un ticker.")
             basket_tickers_A = None
+            basket_weights_A = None
+            label_A = ""
+            ticker_A = None
 
     st.markdown("---")
     do_comparison = st.checkbox("Comparer avec un second sous-jacent")
@@ -497,21 +515,36 @@ with st.sidebar:
             label_B  = choix_B
             basket_tickers_B = None
         else:
-            selected_B = {}
-            for region, actions in ACTIONS_CATALOGUE.items():
-                with st.expander(region + " (B)", expanded=False):
-                    for nom, tkr in actions.items():
-                        if st.checkbox(nom, key=f"chkb_{tkr}"):
-                            selected_B[nom] = tkr
-            if len(selected_B) >= 2:
-                nb  = len(selected_B)
-                dwb = round(100/nb)
-                poids_b = {}
-                for nom, tkr in selected_B.items():
-                    poids_b[nom] = st.number_input(nom[:7]+" B", min_value=1, max_value=100, value=dwb, step=1, key=f"wb_{tkr}")
-                basket_tickers_B = list(selected_B.values())
-                basket_weights_B = [v/100 for v in poids_b.values()]
-                label_B  = " / ".join(list(selected_B.keys())[:3])
+            st.caption("Entre jusqu'a 10 tickers pour le panier B")
+            if "basket_rows_b" not in st.session_state:
+                st.session_state.basket_rows_b = [{"ticker": "", "poids": 50},
+                                                   {"ticker": "", "poids": 50}]
+            rows_b   = st.session_state.basket_rows_b
+            to_del_b = None
+            for i, row in enumerate(rows_b):
+                c1, c2, c3 = st.columns([3, 2, 1])
+                with c1:
+                    rows_b[i]["ticker"] = st.text_input(f"Ticker B{i+1}", value=row["ticker"],
+                        placeholder="ex: MSFT", key=f"tkb_{i}", label_visibility="collapsed")
+                with c2:
+                    rows_b[i]["poids"] = st.number_input(f"Poids B{i+1}", min_value=1, max_value=100,
+                        value=row["poids"], step=1, key=f"pwb_{i}", label_visibility="collapsed")
+                with c3:
+                    if len(rows_b) > 2:
+                        if st.button("x", key=f"delb_{i}"):
+                            to_del_b = i
+            if to_del_b is not None:
+                st.session_state.basket_rows_b.pop(to_del_b)
+                st.rerun()
+            if len(rows_b) < 10:
+                if st.button("+ Ajouter (B)"):
+                    st.session_state.basket_rows_b.append({"ticker": "", "poids": 10})
+                    st.rerun()
+            valid_b = [(r["ticker"].strip().upper(), r["poids"]) for r in rows_b if r["ticker"].strip()]
+            if len(valid_b) >= 2:
+                basket_tickers_B = [t for t, _ in valid_b]
+                basket_weights_B = [p/100 for _, p in valid_b]
+                label_B = " / ".join(basket_tickers_B)
                 ticker_B = None
             else:
                 basket_tickers_B = None
@@ -525,7 +558,7 @@ with st.sidebar:
     END   = f"{end_year}-01-01"
 
     st.markdown("---")
-    st.markdown("**Produit Structuré**")
+    st.markdown("**Produit**")
     T_prod    = st.slider("Maturite (ans)", 3, 12, 8)
     coupon    = st.slider("Coupon annuel (%)", 2, 15, 6) / 100
     b_protect = st.slider("Barriere protection (%)", 40, 80, 60) / 100
@@ -534,29 +567,18 @@ with st.sidebar:
                      "barriere_rappel":b_rappel, "barriere_protect":b_protect, "nominal":100.0}
 
     st.markdown("---")
-    M_SIM   = st.select_slider("Nb simulations", options=[1_000,5_000,10_000,20_000], value=10_000)
+    # 10 000 simulations par défaut, pas de slider
+    M_SIM = 10_000
+
     can_run = (mode == "Indice unique") or (basket_tickers_A is not None and len(basket_tickers_A) >= 2)
     run     = st.button("LANCER LA SIMULATION", use_container_width=True, disabled=not can_run)
 
 # ── HEADER ──
-st.markdown('<p class="main-title">Structured Products Risk Analysis</p>', unsafe_allow_html=True)
-st.markdown('<p class="main-subtitle">Structured Products Risk Simulator — Heston Stochastic Volatility</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-title">STRUCTURED PRODUCTS RISK SIMULATOR</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-subtitle">Heston Stochastic Volatility  ·  Monte Carlo  ·  T. Domange</p>', unsafe_allow_html=True)
 
 # ── SIMULATION ──
-if run or "res_A" in st.session_state:
-    if "res_A" in st.session_state and not run:
-        res_A        = st.session_state["res_A"]
-        d_A          = st.session_state["d_A"]
-        S_A          = st.session_state["S_A"]
-        heston_A     = st.session_state["heston_A"]
-        label_A      = st.session_state["label_A"]
-        ATHENA_PARAMS= st.session_state["ATHENA_PARAMS"]
-        T_prod       = st.session_state["T_prod"]
-        coupon       = st.session_state["coupon"]
-        b_protect    = st.session_state["b_protect"]
-        b_rappel     = st.session_state["b_rappel"]
-        M_SIM        = st.session_state["M_SIM"]
-        do_comparison = False
+if run:
     STEPS = 52
     with st.spinner(f"Calibration Heston sur {label_A}..."):
         try:
@@ -566,17 +588,19 @@ if run or "res_A" in st.session_state:
             S_A, _, _   = simulate_heston(heston_A, T=T_prod, M=M_SIM, steps_per_year=STEPS)
             res_A       = pricer_athena(S_A, params=ATHENA_PARAMS, steps_per_year=STEPS)
             d_A         = res_A["details"]
-            st.session_state["res_A"]      = res_A
-            st.session_state["d_A"]        = d_A
-            st.session_state["S_A"]        = S_A
-            st.session_state["heston_A"]   = heston_A
-            st.session_state["label_A"]    = label_A
+            # Sauvegarde dans session_state
+            st.session_state["res_A"]         = res_A
+            st.session_state["d_A"]           = d_A
+            st.session_state["S_A"]           = S_A
+            st.session_state["heston_A"]      = heston_A
+            st.session_state["label_A"]       = label_A
             st.session_state["ATHENA_PARAMS"] = ATHENA_PARAMS
-            st.session_state["T_prod"]     = T_prod
-            st.session_state["coupon"]     = coupon
-            st.session_state["b_protect"]  = b_protect
-            st.session_state["b_rappel"]   = b_rappel
-            st.session_state["M_SIM"]      = M_SIM
+            st.session_state["T_prod"]        = T_prod
+            st.session_state["coupon"]        = coupon
+            st.session_state["b_protect"]     = b_protect
+            st.session_state["b_rappel"]      = b_rappel
+            st.session_state["M_SIM"]         = M_SIM
+            st.session_state["do_comparison"] = False
         except Exception as e:
             st.error(f"Erreur : {e}")
             st.stop()
@@ -590,10 +614,31 @@ if run or "res_A" in st.session_state:
                 S_B, _, _   = simulate_heston(heston_B, T=T_prod, M=M_SIM, steps_per_year=STEPS)
                 res_B       = pricer_athena(S_B, params=ATHENA_PARAMS, steps_per_year=STEPS)
                 d_B         = res_B["details"]
+                st.session_state["res_B"]         = res_B
+                st.session_state["d_B"]           = d_B
+                st.session_state["S_B"]           = S_B
+                st.session_state["heston_B"]      = heston_B
+                st.session_state["label_B"]       = label_B
+                st.session_state["do_comparison"] = True
             except Exception as e:
                 st.error(f"Erreur {label_B} : {e}")
-                do_comparison = False
 
+if "res_A" in st.session_state:
+    # Récupère depuis session_state
+    res_A         = st.session_state["res_A"]
+    d_A           = st.session_state["d_A"]
+    S_A           = st.session_state["S_A"]
+    heston_A      = st.session_state["heston_A"]
+    label_A       = st.session_state["label_A"]
+    ATHENA_PARAMS = st.session_state["ATHENA_PARAMS"]
+    T_prod        = st.session_state["T_prod"]
+    coupon        = st.session_state["coupon"]
+    b_protect     = st.session_state["b_protect"]
+    b_rappel      = st.session_state["b_rappel"]
+    M_SIM         = st.session_state["M_SIM"]
+    do_comp_saved = st.session_state.get("do_comparison", False)
+
+    # Métriques
     st.markdown(f'<div class="section-header">Resultats — {label_A}</div>', unsafe_allow_html=True)
     c1,c2,c3,c4,c5 = st.columns(5)
     for col, val, lbl, cls in [
@@ -616,6 +661,12 @@ if run or "res_A" in st.session_state:
         col4.metric("Xi",             f"{hc['xi']:.2f}")
         col5.metric("Rho",            f"{hc['rho']:.2f}")
 
+    # Graphiques
+    st.markdown('<div class="section-header">Simulation Monte Carlo</div>', unsafe_allow_html=True)
+    buf_mc = plot_monte_carlo(S_A, ATHENA_PARAMS, label_A)
+    st.image(buf_mc, use_container_width=True)
+    st.caption("200 trajectoires affichees sur 10 000 simulees. Rouge = trajectoires ayant touche la barriere de protection. Bleu = trajectoire moyenne.")
+
     st.markdown('<div class="section-header">Analyse graphique</div>', unsafe_allow_html=True)
     buf_kde  = plot_payoff_kde(res_A["payoffs"], ATHENA_PARAMS, label_A)
     buf_sens = plot_sensitivity(S_A, ATHENA_PARAMS, label_A)
@@ -623,12 +674,13 @@ if run or "res_A" in st.session_state:
     buf_cum  = plot_cumul_barrier(S_A, ATHENA_PARAMS, label_A)
 
     tab_names = ["Distribution", "Sensibilite", "Rappels", "Barriere cumulee"]
-    if do_comparison: tab_names.append("Comparaison")
+    if do_comp_saved: tab_names.append("Comparaison")
     tabs = st.tabs(tab_names)
 
     with tabs[0]:
         st.image(buf_kde,  use_container_width=True)
-        st.caption("Zone rouge = scenarios de perte. KDE lissee sur toutes les simulations.")
+        p10_val = np.percentile(res_A["payoffs"], 10)
+        st.caption(f"Zone rouge = scenarios de perte (sous la barriere de protection). KDE lissee sur toutes les simulations. P10 = {p10_val:.1f} : dans 10% des scenarios, le payoff final est inferieur a {p10_val:.1f} pour 100 investis.")
     with tabs[1]:
         st.image(buf_sens, use_container_width=True)
         st.caption("Impact du niveau de barriere sur le risque de perte en capital.")
@@ -639,7 +691,11 @@ if run or "res_A" in st.session_state:
         st.image(buf_cum,  use_container_width=True)
         st.caption("Fraction cumulee des trajectoires ayant touche la barriere au moins une fois.")
 
-    if do_comparison and len(tabs) == 5:
+    if do_comp_saved and len(tabs) == 5:
+        res_B   = st.session_state["res_B"]
+        d_B     = st.session_state["d_B"]
+        S_B     = st.session_state["S_B"]
+        label_B = st.session_state["label_B"]
         with tabs[4]:
             buf_cmp = plot_comparison(res_A, S_A, label_A, res_B, S_B, label_B, ATHENA_PARAMS)
             st.image(buf_cmp, use_container_width=True)
@@ -655,11 +711,12 @@ if run or "res_A" in st.session_state:
                 with col:
                     st.markdown(f'<div class="metric-card"><div class="metric-value {cls}">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
 
+    # Fiche produit
     v0_pct = np.sqrt(heston_A["v0"]) * 100
     th_pct = np.sqrt(heston_A["theta"]) * 100
     st.markdown('<div class="section-header">Fiche Produit</div>', unsafe_allow_html=True)
     st.markdown(f"""<div class="fiche">
-        <div class="fiche-title">TERM SHEET — ATHENA</div>
+        <div class="fiche-title">TERM SHEET</div>
         <div class="fiche-row"><span class="fiche-key">Sous-jacent</span><span class="fiche-val">{label_A}</span></div>
         <div class="fiche-row"><span class="fiche-key">Maturite</span><span class="fiche-val">{T_prod} ans</span></div>
         <div class="fiche-row"><span class="fiche-key">Coupon annuel</span><span class="fiche-val">{coupon*100:.1f}% cumulatif</span></div>
@@ -675,41 +732,35 @@ if run or "res_A" in st.session_state:
         <div class="fiche-row"><span class="fiche-key">Taux annualise moyen</span><span class="fiche-val">{d_A['taux_actualise']:.2f}%</span></div>
     </div>""", unsafe_allow_html=True)
 
+    # Export PDF uniquement
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
     with st.spinner("Generation du PDF..."):
-        b2  = plot_payoff_kde(res_A["payoffs"], ATHENA_PARAMS, label_A)
-        b2s = plot_sensitivity(S_A, ATHENA_PARAMS, label_A)
-        b2r = plot_recall_bars(d_A["recall_proba"], T_prod, label_A)
-        b2c = plot_cumul_barrier(S_A, ATHENA_PARAMS, label_A)
-        pdf_buf = generate_pdf(label=label_A, params=ATHENA_PARAMS, heston_params=heston_A,
+        b2   = plot_payoff_kde(res_A["payoffs"], ATHENA_PARAMS, label_A)
+        b2s  = plot_sensitivity(S_A, ATHENA_PARAMS, label_A)
+        b2r  = plot_recall_bars(d_A["recall_proba"], T_prod, label_A)
+        b2c  = plot_cumul_barrier(S_A, ATHENA_PARAMS, label_A)
+        b2mc = plot_monte_carlo(S_A, ATHENA_PARAMS, label_A)
+        b2cmp = None
+        lbl_b_pdf = None
+        if do_comp_saved and "S_B" in st.session_state:
+            b2cmp = plot_comparison(res_A, S_A, label_A,
+                                    st.session_state["res_B"], st.session_state["S_B"],
+                                    st.session_state["label_B"], ATHENA_PARAMS)
+            lbl_b_pdf = st.session_state["label_B"]
+        pdf_buf = generate_pdf(
+            label=label_A, params=ATHENA_PARAMS, heston_params=heston_A,
             details=d_A, recall_proba=d_A["recall_proba"],
-            buf_kde=b2, buf_sensitivity=b2s, buf_recalls=b2r, buf_cumul=b2c)
-
-    col_pdf, col_txt = st.columns(2)
-    with col_pdf:
-        st.download_button(label="Telecharger le PDF client (2 pages)", data=pdf_buf,
-            file_name=f"athena_{label_A.replace(' ','_').replace('/','_')}.pdf",
-            mime="application/pdf", use_container_width=True)
-    with col_txt:
-        fiche_txt = (
-            f"Structured Products Risk Analysis — {label_A}\n{'='*50}\n"
-            f"Maturite : {T_prod} ans  |  Coupon : {coupon*100:.1f}%/an\n"
-            f"Barriere protection : {b_protect*100:.0f}%  |  Barriere rappel : {b_rappel*100:.0f}%\n\n"
-            f"RESULTATS ({M_SIM:,} simulations)\n"
-            f"P(barriere touchee)  : {d_A['P_barriere']*100:.1f}%\n"
-            f"P(rappel anticipe)   : {d_A['P_rappel']*100:.1f}%\n"
-            f"P(perte a maturite)  : {d_A['P_perte_maturite']*100:.1f}%\n"
-            f"Payoff moyen         : {d_A['payoff_moyen']:.1f}\n"
-            f"Payoff P10 / P90     : {d_A['payoff_p10']:.1f} / {d_A['payoff_p90']:.1f}\n"
-            f"Duree de vie moy.    : {d_A['duree_vie_moyenne']:.1f} ans\n"
-            f"Taux annualise moy.  : {d_A['taux_actualise']:.2f}%\n\n"
-            f"HESTON CALIBRE\n"
-            f"v0={v0_pct:.1f}%  theta={th_pct:.1f}%  kappa={heston_A['kappa']}  xi={heston_A['xi']}  rho={heston_A['rho']}\n"
+            buf_kde=b2, buf_sensitivity=b2s, buf_recalls=b2r, buf_cumul=b2c, buf_mc=b2mc,
+            buf_comparison=b2cmp, label_b=lbl_b_pdf,
         )
-        st.download_button(label="Telecharger la fiche (.txt)", data=fiche_txt,
-            file_name=f"athena_{label_A.replace(' ','_').replace('/','_')}.txt",
-            mime="text/plain", use_container_width=True)
+    st.download_button(
+        label="Telecharger le PDF client (2 pages)",
+        data=pdf_buf,
+        file_name=f"sprs_{label_A.replace(' ','_').replace('/','_')}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
 else:
     st.markdown("""
@@ -721,7 +772,8 @@ else:
         </div>
         <div style="font-size:0.75rem; margin-top:2rem; color:#334155; font-family:'IBM Plex Mono',monospace;">
             Modele · Heston (vol stochastique) calibre sur donnees reelles<br>
-            Methode · Monte Carlo — calibration AR(1) sur variance realisee
+            Methode · Monte Carlo — 10 000 simulations — calibration AR(1) sur variance realisee<br>
+            T. Domange · ESCP Business School
         </div>
     </div>
     """, unsafe_allow_html=True)
