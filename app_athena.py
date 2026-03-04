@@ -31,7 +31,6 @@ st.set_page_config(
     page_title="Structured Products Risk Simulator",
     layout="wide",
     initial_sidebar_state="expanded",
-    theme={"base": "dark", "backgroundColor": "#080c14", "secondaryBackgroundColor": "#0d1220", "textColor": "#e2e8f0", "primaryColor": "#3b82f6"}
 )
 
 st.markdown("""
