@@ -48,7 +48,7 @@ def resolve_ticker(input_str: str) -> tuple[str, str]:
             if not ticker:
                 raise ValueError(f"ISIN {input_str} non reconnu par Yahoo Finance.")
             name = info.get("shortName", ticker)
-            return ticker, f"{name} ({input_str})"
+            return ticker, name
         except Exception as e:
             raise ValueError(f"Impossible de résoudre l'ISIN {input_str} : {e}")
     else:
@@ -162,8 +162,8 @@ def plot_monte_carlo(S, params, label):
         for i in idx:
             traj = S[i]
             touched = np.any(traj < bp)
-            color = RED if touched else "#1e3a5f"
-            alpha = 0.25 if touched else 0.12
+            color = "#ff4444" if touched else "#00aaff"
+            alpha = 0.35 if touched else 0.18
             ax.plot(t, traj, color=color, lw=0.6, alpha=alpha)
         ax.axhline(100,  color=TEXT,  lw=1.5, ls="--", label="Niveau initial (100)", zorder=5)
         ax.axhline(bp,   color=RED,   lw=1.5, ls="--", label=f"Barriere protection ({bp:.0f}%)", zorder=5)
