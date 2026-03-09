@@ -27,6 +27,34 @@ from heston_simulator import (
 )
 from athena_payoff import pricer_athena
 
+import re
+
+def resolve_ticker(input_str: str) -> tuple[str, str]:
+    """
+    Accepte un ISIN (ex: US0378331005) ou un ticker (ex: AAPL).
+    Retourne (ticker_yahoo, label_affiche).
+    Un ISIN est 12 caractères : 2 lettres + 10 alphanumériques.
+    """
+    input_str = input_str.strip().upper()
+    isin_pattern = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')
+    
+    if isin_pattern.match(input_str):
+        # C'est un ISIN — on cherche le ticker via yfinance
+        import yfinance as yf
+        try:
+            ticker_obj = yf.Ticker(input_str)
+            info = ticker_obj.get_info()
+            ticker = info.get("symbol", None)
+            if not ticker:
+                raise ValueError(f"ISIN {input_str} non reconnu par Yahoo Finance.")
+            name = info.get("shortName", ticker)
+            return ticker, f"{name} ({input_str})"
+        except Exception as e:
+            raise ValueError(f"Impossible de résoudre l'ISIN {input_str} : {e}")
+    else:
+        # C'est déjà un ticker — on le retourne tel quel
+        return input_str, input_str
+
 st.set_page_config(
     page_title="Structured Products Risk Simulator",
     layout="wide",
@@ -468,7 +496,7 @@ with st.sidebar:
             c1, c2, c3 = st.columns([3, 2, 1])
             with c1:
                 rows[i]["ticker"] = st.text_input(f"Ticker {i+1}", value=row["ticker"],
-                    placeholder="ex: AAPL", key=f"tk_{i}", label_visibility="collapsed")
+                    placeholder="ex: AAPL ou US0378331005", key=f"tk_{i}", label_visibility="collapsed")
             with c2:
                 rows[i]["poids"] = st.number_input(f"Poids {i+1}", min_value=1, max_value=100,
                     value=row["poids"], step=1, key=f"pw_{i}", label_visibility="collapsed")
@@ -485,7 +513,7 @@ with st.sidebar:
                 st.session_state.basket_rows.append({"ticker": "", "poids": 10})
                 st.rerun()
 
-        valid_rows = [(r["ticker"].strip().upper(), r["poids"]) for r in rows if r["ticker"].strip()]
+        valid_rows = [(r["ticker"].strip(), r["poids"]) for r in rows if r["ticker"].strip()]
         total_poids = sum(p for _, p in valid_rows)
         if total_poids != 100 and len(valid_rows) >= 2:
             st.warning(f"Total : {total_poids}% (objectif : 100%)")
@@ -493,9 +521,17 @@ with st.sidebar:
             st.success("Panier valide")
 
         if len(valid_rows) >= 2:
-            basket_tickers_A = [t for t, _ in valid_rows]
-            basket_weights_A = [p/100 for _, p in valid_rows]
-            label_A = " / ".join(basket_tickers_A)
+            try:
+                resolved_A = [resolve_ticker(t) for t, _ in valid_rows]
+                basket_weights_A = [p/100 for _, p in valid_rows]
+                basket_tickers_A = [ticker for ticker, _ in resolved_A]
+                label_A = " / ".join(label for _, label in resolved_A)
+                ticker_A = None
+            except ValueError as e:
+                st.error(str(e))
+            basket_tickers_A = None
+            basket_weights_A = None
+            label_A = ""
             ticker_A = None
         else:
             basket_tickers_A = None
@@ -525,7 +561,7 @@ with st.sidebar:
                 c1, c2, c3 = st.columns([3, 2, 1])
                 with c1:
                     rows_b[i]["ticker"] = st.text_input(f"Ticker B{i+1}", value=row["ticker"],
-                        placeholder="ex: MSFT", key=f"tkb_{i}", label_visibility="collapsed")
+                        placeholder="ex: AAPL ou US0378331005", key=f"tkb_{i}", label_visibility="collapsed")
                 with c2:
                     rows_b[i]["poids"] = st.number_input(f"Poids B{i+1}", min_value=1, max_value=100,
                         value=row["poids"], step=1, key=f"pwb_{i}", label_visibility="collapsed")
@@ -540,12 +576,18 @@ with st.sidebar:
                 if st.button("+ Ajouter (B)"):
                     st.session_state.basket_rows_b.append({"ticker": "", "poids": 10})
                     st.rerun()
-            valid_b = [(r["ticker"].strip().upper(), r["poids"]) for r in rows_b if r["ticker"].strip()]
+            valid_b = [(r["ticker"].strip(), r["poids"]) for r in rows_b if r["ticker"].strip()]
             if len(valid_b) >= 2:
-                basket_tickers_B = [t for t, _ in valid_b]
-                basket_weights_B = [p/100 for _, p in valid_b]
-                label_B = " / ".join(basket_tickers_B)
-                ticker_B = None
+                try:
+                    resolved_B = [resolve_ticker(t) for t, _ in valid_b]
+                    basket_tickers_B = [ticker for ticker, _ in resolved_B]
+                    basket_weights_B = [p/100 for _, p in valid_b]
+                    label_B = " / ".join(label for _, label in resolved_B)
+                    ticker_B = None
+                except ValueError as e:
+                    st.error(str(e))
+                    basket_tickers_B = None
+                    label_B = "?"
             else:
                 basket_tickers_B = None
                 label_B = "?"
